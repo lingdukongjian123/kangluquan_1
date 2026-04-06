@@ -95,7 +95,7 @@ export default function App() {
   
   // Modal states
   const [selectedMachine, setSelectedMachine] = useState<Machine | null>(null);
-  const [modalType, setModalType] = useState<'report' | 'start' | 'complete' | 'history' | 'add' | 'edit' | 'edit_person' | null>(null);
+  const [modalType, setModalType] = useState<'report' | 'start' | 'complete' | 'history' | 'add' | 'edit' | 'edit_person' | 'delete_confirm' | null>(null);
 
   // Form states
   const [selectedFaults, setSelectedFaults] = useState<string[]>([]);
@@ -105,6 +105,41 @@ export default function App() {
   const [newMachineId, setNewMachineId] = useState('');
   const [newCommunity, setNewCommunity] = useState('');
   const [newLocation, setNewLocation] = useState('');
+
+  const NumericKeypad = ({ value, onChange }: { value: string, onChange: (val: string) => void }) => {
+    const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];
+    
+    const handleKeyClick = (key: string) => {
+      if (key === 'C') {
+        onChange('');
+      } else if (key === '⌫') {
+        onChange(value.slice(0, -1));
+      } else {
+        if (value.length < 6) { // Limit to 6 digits
+          onChange(value + key);
+        }
+      }
+    };
+
+    return (
+      <div className="grid grid-cols-3 gap-2 mt-4">
+        {keys.map(key => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => handleKeyClick(key)}
+            className={`py-4 rounded-2xl text-xl font-black transition-all active:scale-95 ${
+              key === 'C' ? 'bg-red-50 text-red-500' : 
+              key === '⌫' ? 'bg-gray-100 text-gray-500' : 
+              'bg-gray-50 text-gray-900 hover:bg-gray-100'
+            }`}
+          >
+            {key}
+          </button>
+        ))}
+      </div>
+    );
+  };
 
   const faultOptions = [
     'PP滤芯更换',
@@ -213,11 +248,25 @@ export default function App() {
     };
   }, [machines]);
 
+  const parseError = (err: unknown): string => {
+    if (err instanceof Error) {
+      try {
+        const parsed = JSON.parse(err.message);
+        return parsed.error || err.message;
+      } catch {
+        return err.message;
+      }
+    }
+    return String(err);
+  };
+
   const handleAddMachine = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!newMachineId) return alert('请输入设备编号');
+    const fullId = `KLQ-${newMachineId}`;
     try {
       await machineService.addMachine({
-        id: newMachineId,
+        id: fullId,
         community: newCommunity,
         location: newLocation
       });
@@ -226,7 +275,7 @@ export default function App() {
       setNewLocation('');
       setModalType(null);
     } catch (err) {
-      alert(err instanceof Error ? err.message : '添加失败');
+      alert('添加失败: ' + parseError(err));
     }
   };
 
@@ -248,7 +297,7 @@ export default function App() {
         setCustomFault('');
         setModalType(null);
       } catch (err) {
-        alert('报修失败');
+        alert('报修失败: ' + parseError(err));
       }
     }
   };
@@ -256,14 +305,27 @@ export default function App() {
   const handleEditMachine = async (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedMachine) {
+      if (!newMachineId) return alert('请输入设备编号');
+      const fullId = `KLQ-${newMachineId}`;
       try {
-        await machineService.updateMachine(selectedMachine.id, {
+        await machineService.renameMachine(selectedMachine.id, fullId, {
           community: newCommunity,
           location: newLocation
         });
         setModalType(null);
       } catch (err) {
-        alert('更新失败');
+        alert('更新失败: ' + parseError(err));
+      }
+    }
+  };
+
+  const handleDeleteMachine = async () => {
+    if (selectedMachine) {
+      try {
+        await machineService.deleteMachine(selectedMachine.id);
+        setModalType(null);
+      } catch (err) {
+        alert('删除失败: ' + parseError(err));
       }
     }
   };
@@ -274,7 +336,7 @@ export default function App() {
         await machineService.startRepair(selectedMachine.id, workerName);
         setModalType(null);
       } catch (err) {
-        alert('操作失败');
+        alert('操作失败: ' + parseError(err));
       }
     }
   };
@@ -291,7 +353,7 @@ export default function App() {
         setPartsReplaced('');
         setModalType(null);
       } catch (err) {
-        alert('操作失败');
+        alert('操作失败: ' + parseError(err));
       }
     }
   };
@@ -542,6 +604,9 @@ export default function App() {
                   <button 
                     onClick={() => { 
                       setSelectedMachine(machine); 
+                      // Extract numeric part if it starts with KLQ-
+                      const numericPart = machine.id.startsWith('KLQ-') ? machine.id.replace('KLQ-', '') : machine.id;
+                      setNewMachineId(numericPart);
                       setNewCommunity(machine.community);
                       setNewLocation(machine.location);
                       setModalType('edit'); 
@@ -549,6 +614,15 @@ export default function App() {
                     className="flex items-center justify-center gap-2 py-2.5 bg-white text-blue-600 rounded-xl text-xs font-black uppercase tracking-wider hover:bg-blue-50 transition-colors border border-blue-100 shadow-sm"
                   >
                     <Edit size={16} /> 编辑
+                  </button>
+                  <button 
+                    onClick={() => { 
+                      setSelectedMachine(machine); 
+                      setModalType('delete_confirm'); 
+                    }}
+                    className="flex items-center justify-center gap-2 py-2.5 bg-white text-red-600 rounded-xl text-xs font-black uppercase tracking-wider hover:bg-red-50 transition-colors border border-red-100 shadow-sm"
+                  >
+                    <Trash2 size={16} /> 删除
                   </button>
                 </div>
               </motion.div>
@@ -562,9 +636,24 @@ export default function App() {
         {modalType === 'add' && (
           <Modal isOpen={true} onClose={() => setModalType(null)} title="新增设备">
             <form onSubmit={handleAddMachine} className="space-y-4">
-              <input required placeholder="设备编号 (如 KLQ-001)" className="w-full p-4 bg-gray-50 rounded-2xl outline-none" value={newMachineId} onChange={e => setNewMachineId(e.target.value)} />
-              <input required placeholder="所属小区" className="w-full p-4 bg-gray-50 rounded-2xl outline-none" value={newCommunity} onChange={e => setNewCommunity(e.target.value)} />
-              <input placeholder="具体位置" className="w-full p-4 bg-gray-50 rounded-2xl outline-none" value={newLocation} onChange={e => setNewLocation(e.target.value)} />
+              <div className="space-y-1">
+                <label className="text-[10px] text-gray-400 font-bold uppercase ml-2">设备编号</label>
+                <div className="flex items-center gap-2">
+                  <span className="bg-gray-100 px-4 py-4 rounded-2xl font-black text-xl text-gray-500">KLQ-</span>
+                  <div className="flex-1 p-4 bg-gray-50 rounded-2xl text-xl font-black text-blue-600 min-h-[60px] flex items-center">
+                    {newMachineId || <span className="text-gray-300">请输入数字</span>}
+                  </div>
+                </div>
+                <NumericKeypad value={newMachineId} onChange={setNewMachineId} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] text-gray-400 font-bold uppercase ml-2">所属小区</label>
+                <input required placeholder="所属小区" className="w-full p-4 bg-gray-50 rounded-2xl outline-none border border-gray-100 focus:border-blue-500" value={newCommunity} onChange={e => setNewCommunity(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] text-gray-400 font-bold uppercase ml-2">具体位置</label>
+                <input placeholder="具体位置" className="w-full p-4 bg-gray-50 rounded-2xl outline-none border border-gray-100 focus:border-blue-500" value={newLocation} onChange={e => setNewLocation(e.target.value)} />
+              </div>
               <button type="submit" className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black shadow-lg">确认添加</button>
             </form>
           </Modal>
@@ -573,6 +662,16 @@ export default function App() {
         {modalType === 'edit' && selectedMachine && (
           <Modal isOpen={true} onClose={() => setModalType(null)} title={`编辑设备 - ${selectedMachine.id}`}>
             <form onSubmit={handleEditMachine} className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-[10px] text-gray-400 font-bold uppercase ml-2">设备编号</label>
+                <div className="flex items-center gap-2">
+                  <span className="bg-gray-100 px-4 py-4 rounded-2xl font-black text-xl text-gray-500">KLQ-</span>
+                  <div className="flex-1 p-4 bg-gray-50 rounded-2xl text-xl font-black text-blue-600 min-h-[60px] flex items-center">
+                    {newMachineId || <span className="text-gray-300">请输入数字</span>}
+                  </div>
+                </div>
+                <NumericKeypad value={newMachineId} onChange={setNewMachineId} />
+              </div>
               <div className="space-y-1">
                 <label className="text-[10px] text-gray-400 font-bold uppercase ml-2">所属小区</label>
                 <input required placeholder="所属小区" className="w-full p-4 bg-gray-50 rounded-2xl outline-none border border-gray-100 focus:border-blue-500" value={newCommunity} onChange={e => setNewCommunity(e.target.value)} />
@@ -583,6 +682,22 @@ export default function App() {
               </div>
               <button type="submit" className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black shadow-lg">保存修改</button>
             </form>
+          </Modal>
+        )}
+
+        {modalType === 'delete_confirm' && selectedMachine && (
+          <Modal isOpen={true} onClose={() => setModalType(null)} title="确认删除">
+            <div className="space-y-6 text-center">
+              <div className="bg-red-50 p-6 rounded-3xl border border-red-100">
+                <Trash2 className="mx-auto text-red-500 mb-4" size={48} />
+                <p className="text-gray-900 font-black text-lg">确定要删除设备 {selectedMachine.id} 吗？</p>
+                <p className="text-gray-500 text-sm mt-2">此操作不可撤销，该设备的所有信息将被永久删除。</p>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <button onClick={() => setModalType(null)} className="py-4 bg-gray-100 text-gray-600 rounded-2xl font-black">取消</button>
+                <button onClick={handleDeleteMachine} className="py-4 bg-red-600 text-white rounded-2xl font-black shadow-lg shadow-red-100">确认删除</button>
+              </div>
+            </div>
           </Modal>
         )}
 

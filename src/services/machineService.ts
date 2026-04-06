@@ -207,3 +207,50 @@ export const updateMachine = async (machineId: string, data: Partial<Machine>) =
     handleFirestoreError(error, OperationType.UPDATE, `${MACHINES_COLLECTION}/${machineId}`);
   }
 };
+
+export const deleteMachine = async (machineId: string) => {
+  const machineRef = doc(db, MACHINES_COLLECTION, machineId);
+  try {
+    const batch = writeBatch(db);
+    batch.delete(machineRef);
+    
+    // Also delete associated repairs? Or just leave them? 
+    // Usually better to delete them to keep DB clean if the machine is gone.
+    // But for now, let's just delete the machine.
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `${MACHINES_COLLECTION}/${machineId}`);
+  }
+};
+
+export const renameMachine = async (oldId: string, newId: string, data: Partial<Machine>) => {
+  if (oldId === newId) {
+    return updateMachine(oldId, data);
+  }
+  
+  const oldRef = doc(db, MACHINES_COLLECTION, oldId);
+  const newRef = doc(db, MACHINES_COLLECTION, newId);
+  
+  try {
+    const oldSnap = await getDoc(oldRef);
+    if (!oldSnap.exists()) throw new Error('原设备不存在');
+    
+    const newSnap = await getDoc(newRef);
+    if (newSnap.exists()) throw new Error('新设备编号已存在');
+    
+    const batch = writeBatch(db);
+    const oldData = oldSnap.data();
+    
+    batch.set(newRef, {
+      ...oldData,
+      ...data,
+      id: newId
+    });
+    
+    batch.delete(oldRef);
+    
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `rename_${oldId}_to_${newId}`);
+  }
+};
