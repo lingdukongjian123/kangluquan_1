@@ -1,0 +1,209 @@
+import { 
+  collection, 
+  doc, 
+  setDoc, 
+  updateDoc, 
+  onSnapshot, 
+  query, 
+  orderBy, 
+  serverTimestamp, 
+  writeBatch,
+  getDoc,
+  getDocFromServer
+} from 'firebase/firestore';
+import { db, auth } from '../firebase';
+import { Machine, Status } from '../types';
+
+const MACHINES_COLLECTION = 'machines';
+const REPAIRS_COLLECTION = 'repairs';
+
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
+export const testConnection = async () => {
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+  } catch (error) {
+    if(error instanceof Error && error.message.includes('the client is offline')) {
+      console.error("Please check your Firebase configuration. ");
+    }
+  }
+};
+
+export const subscribeToMachines = (callback: (machines: Machine[]) => void) => {
+  const q = query(collection(db, MACHINES_COLLECTION));
+  return onSnapshot(q, (snapshot) => {
+    const machines = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as any[];
+    
+    const formattedMachines: Machine[] = machines.map(m => ({
+      id: m.id,
+      currentStatus: m.status || 'normal',
+      community: m.community || '',
+      location: m.location || '',
+      lastFault: m.lastFault || '',
+      lastRepairTime: m.lastRepairTime || '',
+      lastRepairMan: m.lastRepairMan || '',
+      repairHistory: []
+    }));
+    
+    callback(formattedMachines);
+  }, (error) => {
+    handleFirestoreError(error, OperationType.LIST, MACHINES_COLLECTION);
+  });
+};
+
+export const subscribeToRepairs = (callback: (repairs: any[]) => void) => {
+  const q = query(collection(db, REPAIRS_COLLECTION), orderBy('date', 'desc'));
+  return onSnapshot(q, (snapshot) => {
+    const repairs = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+      date: doc.data().date?.toDate()?.toLocaleString() || ''
+    }));
+    callback(repairs);
+  }, (error) => {
+    handleFirestoreError(error, OperationType.LIST, REPAIRS_COLLECTION);
+  });
+};
+
+export const addMachine = async (machine: Partial<Machine>) => {
+  if (!machine.id) throw new Error('ID is required');
+  const path = `${MACHINES_COLLECTION}/${machine.id}`;
+  try {
+    const docRef = doc(db, MACHINES_COLLECTION, machine.id);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) throw new Error('设备编号已存在');
+    
+    await setDoc(docRef, {
+      id: machine.id,
+      community: machine.community,
+      location: machine.location,
+      status: 'normal',
+      createdAt: serverTimestamp()
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+};
+
+export const reportFault = async (machineId: string, faultDesc: string, workerName: string) => {
+  const batch = writeBatch(db);
+  const machineRef = doc(db, MACHINES_COLLECTION, machineId);
+  const repairRef = doc(collection(db, REPAIRS_COLLECTION));
+  
+  try {
+    batch.update(machineRef, { 
+      status: 'fault',
+      lastFault: faultDesc
+    });
+    
+    batch.set(repairRef, {
+      machineId,
+      faultDesc,
+      status: 'pending',
+      date: serverTimestamp(),
+      worker: workerName
+    });
+    
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, 'batch_report_fault');
+  }
+};
+
+export const startRepair = async (machineId: string, workerName: string) => {
+  const machineRef = doc(db, MACHINES_COLLECTION, machineId);
+  try {
+    await updateDoc(machineRef, { 
+      status: 'in_progress',
+      lastRepairMan: workerName
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${MACHINES_COLLECTION}/${machineId}`);
+  }
+};
+
+export const completeRepair = async (machineId: string, repairContent: string, partsReplaced: string, workerName: string, repairId: string) => {
+  const batch = writeBatch(db);
+  const machineRef = doc(db, MACHINES_COLLECTION, machineId);
+  const repairRef = doc(db, REPAIRS_COLLECTION, repairId);
+  
+  try {
+    batch.update(machineRef, { 
+      status: 'normal',
+      lastRepairTime: new Date().toLocaleString(),
+      lastRepairMan: workerName
+    });
+    
+    batch.update(repairRef, {
+      status: 'completed',
+      repairContent,
+      partsReplaced,
+      completeDate: serverTimestamp()
+    });
+    
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, 'batch_complete_repair');
+  }
+};
+
+export const updateMachine = async (machineId: string, data: Partial<Machine>) => {
+  const machineRef = doc(db, MACHINES_COLLECTION, machineId);
+  try {
+    await updateDoc(machineRef, data);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${MACHINES_COLLECTION}/${machineId}`);
+  }
+};

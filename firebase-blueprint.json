@@ -1,0 +1,46 @@
+{
+  "entities": {
+    "Machine": {
+      "title": "Machine",
+      "description": "A water purifier machine",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique machine ID" },
+        "community": { "type": "string", "description": "Community name" },
+        "location": { "type": "string", "description": "Specific location" },
+        "status": { "type": "string", "enum": ["normal", "fault", "in_progress"], "description": "Current status" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" },
+        "lastFault": { "type": "string", "description": "Last reported fault" },
+        "lastRepairMan": { "type": "string", "description": "Last repair person" },
+        "lastRepairTime": { "type": "string", "description": "Last repair completion time" }
+      },
+      "required": ["id", "community", "status"]
+    },
+    "Repair": {
+      "title": "RepairRecord",
+      "description": "A repair record for a machine",
+      "type": "object",
+      "properties": {
+        "machineId": { "type": "string", "description": "Reference to machine ID" },
+        "faultDesc": { "type": "string", "description": "Fault description" },
+        "repairContent": { "type": "string", "description": "Repair content" },
+        "partsReplaced": { "type": "string", "description": "Parts replaced during repair" },
+        "status": { "type": "string", "enum": ["pending", "completed"], "description": "Repair status" },
+        "date": { "type": "string", "format": "date-time", "description": "Record date" },
+        "worker": { "type": "string", "description": "Worker name" },
+        "completeDate": { "type": "string", "format": "date-time", "description": "Completion timestamp" }
+      },
+      "required": ["machineId", "faultDesc", "status"]
+    }
+  },
+  "firestore": {
+    "/machines/{machineId}": {
+      "schema": "Machine",
+      "description": "Collection of water purifier machines"
+    },
+    "/repairs/{repairId}": {
+      "schema": "Repair",
+      "description": "Collection of repair records"
+    }
+  }
+}
