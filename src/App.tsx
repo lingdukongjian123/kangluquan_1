@@ -81,11 +81,50 @@ const Modal = ({ isOpen, onClose, title, children }: { isOpen: boolean, onClose:
 
 // --- Main App ---
 
+const NumericKeypad = ({ value, onChange }: { value: string, onChange: (val: string) => void }) => {
+  const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];
+  
+  const handleKeyClick = (key: string) => {
+    if (key === 'C') {
+      onChange('');
+    } else if (key === '⌫') {
+      onChange(value.slice(0, -1));
+    } else {
+      if (value.length < 10) { // Increased limit to 10 digits
+        onChange(value + key);
+      }
+    }
+  };
+
+  return (
+    <div className="grid grid-cols-3 gap-2 mt-4">
+      {keys.map(key => (
+        <button
+          key={key}
+          type="button"
+          onClick={() => handleKeyClick(key)}
+          className={`py-4 rounded-2xl text-xl font-black transition-all active:scale-95 ${
+            key === 'C' ? 'bg-red-50 text-red-500' : 
+            key === '⌫' ? 'bg-gray-100 text-gray-500' : 
+            'bg-gray-50 text-gray-900 hover:bg-gray-100'
+          }`}
+        >
+          {key}
+        </button>
+      ))}
+    </div>
+  );
+};
+
+// --- Main App ---
+
 export default function App() {
   const [user, setUser] = useState<any>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
   const [password, setPassword] = useState('');
   const [machines, setMachines] = useState<Machine[]>([]);
   const [repairs, setRepairs] = useState<any[]>([]);
@@ -105,41 +144,6 @@ export default function App() {
   const [newMachineId, setNewMachineId] = useState('');
   const [newCommunity, setNewCommunity] = useState('');
   const [newLocation, setNewLocation] = useState('');
-
-  const NumericKeypad = ({ value, onChange }: { value: string, onChange: (val: string) => void }) => {
-    const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];
-    
-    const handleKeyClick = (key: string) => {
-      if (key === 'C') {
-        onChange('');
-      } else if (key === '⌫') {
-        onChange(value.slice(0, -1));
-      } else {
-        if (value.length < 6) { // Limit to 6 digits
-          onChange(value + key);
-        }
-      }
-    };
-
-    return (
-      <div className="grid grid-cols-3 gap-2 mt-4">
-        {keys.map(key => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => handleKeyClick(key)}
-            className={`py-4 rounded-2xl text-xl font-black transition-all active:scale-95 ${
-              key === 'C' ? 'bg-red-50 text-red-500' : 
-              key === '⌫' ? 'bg-gray-100 text-gray-500' : 
-              'bg-gray-50 text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            {key}
-          </button>
-        ))}
-      </div>
-    );
-  };
 
   const faultOptions = [
     'PP滤芯更换',
@@ -165,7 +169,15 @@ export default function App() {
   // Connection test
   useEffect(() => {
     if (isLoggedIn && user) {
-      machineService.testConnection();
+      const checkConnection = async () => {
+        try {
+          await machineService.testConnection();
+          setIsOffline(false);
+        } catch (err) {
+          setIsOffline(true);
+        }
+      };
+      checkConnection();
     }
   }, [isLoggedIn, user]);
 
@@ -263,7 +275,10 @@ export default function App() {
   const handleAddMachine = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMachineId) return alert('请输入设备编号');
+    if (!newCommunity) return alert('请输入所属小区');
+    
     const fullId = `KLQ-${newMachineId}`;
+    setIsSubmitting(true);
     try {
       await machineService.addMachine({
         id: fullId,
@@ -275,7 +290,10 @@ export default function App() {
       setNewLocation('');
       setModalType(null);
     } catch (err) {
+      console.error('Add machine error:', err);
       alert('添加失败: ' + parseError(err));
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -291,6 +309,7 @@ export default function App() {
     const finalFaultString = finalFaults.join(', ');
     
     if (selectedMachine && finalFaultString) {
+      setIsSubmitting(true);
       try {
         await machineService.reportFault(selectedMachine.id, finalFaultString, workerName);
         setSelectedFaults([]);
@@ -298,6 +317,8 @@ export default function App() {
         setModalType(null);
       } catch (err) {
         alert('报修失败: ' + parseError(err));
+      } finally {
+        setIsSubmitting(false);
       }
     }
   };
@@ -307,6 +328,7 @@ export default function App() {
     if (selectedMachine) {
       if (!newMachineId) return alert('请输入设备编号');
       const fullId = `KLQ-${newMachineId}`;
+      setIsSubmitting(true);
       try {
         await machineService.renameMachine(selectedMachine.id, fullId, {
           community: newCommunity,
@@ -315,28 +337,36 @@ export default function App() {
         setModalType(null);
       } catch (err) {
         alert('更新失败: ' + parseError(err));
+      } finally {
+        setIsSubmitting(false);
       }
     }
   };
 
   const handleDeleteMachine = async () => {
     if (selectedMachine) {
+      setIsSubmitting(true);
       try {
         await machineService.deleteMachine(selectedMachine.id);
         setModalType(null);
       } catch (err) {
         alert('删除失败: ' + parseError(err));
+      } finally {
+        setIsSubmitting(false);
       }
     }
   };
 
   const handleStart = async () => {
     if (selectedMachine) {
+      setIsSubmitting(true);
       try {
         await machineService.startRepair(selectedMachine.id, workerName);
         setModalType(null);
       } catch (err) {
         alert('操作失败: ' + parseError(err));
+      } finally {
+        setIsSubmitting(false);
       }
     }
   };
@@ -344,16 +374,26 @@ export default function App() {
   const handleComplete = async (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedMachine && repairContent) {
-      const pendingRepair = repairs.find(r => r.machineId === selectedMachine.id && r.status === 'pending');
-      if (!pendingRepair) return alert('未找到待处理的维修记录');
+      // Find the pending/in-progress repair record
+      let pendingRepair = repairs.find(r => r.machineId === selectedMachine.id && r.status === 'pending');
       
+      setIsSubmitting(true);
       try {
-        await machineService.completeRepair(selectedMachine.id, repairContent, partsReplaced, workerName, pendingRepair.id);
+        // If no pending record found (e.g. after rename or manual deletion), create a placeholder one to allow completion
+        let repairId = pendingRepair?.id;
+        if (!repairId) {
+          console.warn('No pending repair found, creating a new one on the fly');
+          // We'll let the service handle creating a record if ID is missing or just update the machine
+        }
+        
+        await machineService.completeRepair(selectedMachine.id, repairContent, partsReplaced, workerName, repairId);
         setRepairContent('');
         setPartsReplaced('');
         setModalType(null);
       } catch (err) {
         alert('操作失败: ' + parseError(err));
+      } finally {
+        setIsSubmitting(false);
       }
     }
   };
@@ -412,6 +452,11 @@ export default function App() {
     <div className="min-h-screen bg-gray-50 text-gray-900 font-sans selection:bg-blue-100 selection:text-blue-900">
       {/* Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-40 backdrop-blur-md bg-white/80">
+        {isOffline && (
+          <div className="bg-red-500 text-white text-[10px] font-black text-center py-1 uppercase tracking-widest">
+            网络连接异常 - 请检查网络或 Firebase 配置
+          </div>
+        )}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
@@ -654,7 +699,14 @@ export default function App() {
                 <label className="text-[10px] text-gray-400 font-bold uppercase ml-2">具体位置</label>
                 <input placeholder="具体位置" className="w-full p-4 bg-gray-50 rounded-2xl outline-none border border-gray-100 focus:border-blue-500" value={newLocation} onChange={e => setNewLocation(e.target.value)} />
               </div>
-              <button type="submit" className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black shadow-lg">确认添加</button>
+              <button 
+                type="submit" 
+                disabled={isSubmitting}
+                className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black shadow-lg disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {isSubmitting && <Loader2 className="animate-spin" size={20} />}
+                {isSubmitting ? '正在添加...' : '确认添加'}
+              </button>
             </form>
           </Modal>
         )}
@@ -680,7 +732,14 @@ export default function App() {
                 <label className="text-[10px] text-gray-400 font-bold uppercase ml-2">具体位置</label>
                 <input placeholder="具体位置" className="w-full p-4 bg-gray-50 rounded-2xl outline-none border border-gray-100 focus:border-blue-500" value={newLocation} onChange={e => setNewLocation(e.target.value)} />
               </div>
-              <button type="submit" className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black shadow-lg">保存修改</button>
+              <button 
+                type="submit" 
+                disabled={isSubmitting}
+                className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black shadow-lg disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {isSubmitting && <Loader2 className="animate-spin" size={20} />}
+                {isSubmitting ? '正在保存...' : '保存修改'}
+              </button>
             </form>
           </Modal>
         )}
@@ -695,7 +754,14 @@ export default function App() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <button onClick={() => setModalType(null)} className="py-4 bg-gray-100 text-gray-600 rounded-2xl font-black">取消</button>
-                <button onClick={handleDeleteMachine} className="py-4 bg-red-600 text-white rounded-2xl font-black shadow-lg shadow-red-100">确认删除</button>
+                <button 
+                  disabled={isSubmitting}
+                  onClick={handleDeleteMachine} 
+                  className="py-4 bg-red-600 text-white rounded-2xl font-black shadow-lg shadow-red-100 disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {isSubmitting && <Loader2 className="animate-spin" size={20} />}
+                  确认删除
+                </button>
               </div>
             </div>
           </Modal>
@@ -740,10 +806,11 @@ export default function App() {
               
               <button 
                 type="submit" 
-                disabled={selectedFaults.length === 0 || (selectedFaults.includes('其他') && !customFault)}
-                className="w-full py-4 bg-red-600 text-white rounded-2xl font-black shadow-lg disabled:opacity-50"
+                disabled={selectedFaults.length === 0 || (selectedFaults.includes('其他') && !customFault) || isSubmitting}
+                className="w-full py-4 bg-red-600 text-white rounded-2xl font-black shadow-lg disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                提交报修
+                {isSubmitting && <Loader2 className="animate-spin" size={20} />}
+                {isSubmitting ? '正在提交...' : '提交报修'}
               </button>
             </form>
           </Modal>
@@ -756,7 +823,14 @@ export default function App() {
                 <p className="text-xs text-amber-600 font-bold mb-1">故障描述:</p>
                 <p className="text-sm font-bold text-amber-900">{selectedMachine.lastFault}</p>
               </div>
-              <button onClick={handleStart} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black shadow-lg">确认开始</button>
+              <button 
+                disabled={isSubmitting}
+                onClick={handleStart} 
+                className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black shadow-lg disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {isSubmitting && <Loader2 className="animate-spin" size={20} />}
+                {isSubmitting ? '正在处理...' : '确认开始'}
+              </button>
             </div>
           </Modal>
         )}
@@ -777,7 +851,14 @@ export default function App() {
                 value={partsReplaced}
                 onChange={e => setPartsReplaced(e.target.value)}
               />
-              <button type="submit" className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black shadow-lg">确认完成</button>
+              <button 
+                type="submit" 
+                disabled={isSubmitting}
+                className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black shadow-lg disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {isSubmitting && <Loader2 className="animate-spin" size={20} />}
+                {isSubmitting ? '正在处理...' : '确认完成'}
+              </button>
             </form>
           </Modal>
         )}

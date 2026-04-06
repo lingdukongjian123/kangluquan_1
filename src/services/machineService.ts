@@ -9,7 +9,9 @@ import {
   serverTimestamp, 
   writeBatch,
   getDoc,
-  getDocFromServer
+  getDocFromServer,
+  where,
+  getDocs
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Machine, Status } from '../types';
@@ -73,8 +75,9 @@ export const testConnection = async () => {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
     if(error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration. ");
+      throw new Error('the client is offline');
     }
+    // Ignore other errors like permission denied for this test doc
   }
 };
 
@@ -174,24 +177,42 @@ export const startRepair = async (machineId: string, workerName: string) => {
   }
 };
 
-export const completeRepair = async (machineId: string, repairContent: string, partsReplaced: string, workerName: string, repairId: string) => {
+export const completeRepair = async (machineId: string, repairContent: string, partsReplaced: string, workerName: string, repairId?: string) => {
   const batch = writeBatch(db);
   const machineRef = doc(db, MACHINES_COLLECTION, machineId);
-  const repairRef = doc(db, REPAIRS_COLLECTION, repairId);
   
   try {
     batch.update(machineRef, { 
       status: 'normal',
       lastRepairTime: new Date().toLocaleString(),
-      lastRepairMan: workerName
+      lastRepairMan: workerName,
+      lastFault: null
     });
     
-    batch.update(repairRef, {
-      status: 'completed',
-      repairContent,
-      partsReplaced,
-      completeDate: serverTimestamp()
-    });
+    if (repairId) {
+      const repairRef = doc(db, REPAIRS_COLLECTION, repairId);
+      batch.update(repairRef, {
+        status: 'completed',
+        repairContent,
+        partsReplaced,
+        completeDate: serverTimestamp(),
+        repairMan: workerName
+      });
+    } else {
+      // Create a new record if one wasn't found (e.g. after rename)
+      const repairRef = doc(collection(db, REPAIRS_COLLECTION));
+      batch.set(repairRef, {
+        machineId,
+        faultDesc: '手动完成维修 (原记录丢失或设备已重命名)',
+        repairContent,
+        partsReplaced,
+        status: 'completed',
+        date: serverTimestamp(),
+        completeDate: serverTimestamp(),
+        worker: workerName,
+        repairMan: workerName
+      });
+    }
     
     await batch.commit();
   } catch (error) {
@@ -238,6 +259,10 @@ export const renameMachine = async (oldId: string, newId: string, data: Partial<
     const newSnap = await getDoc(newRef);
     if (newSnap.exists()) throw new Error('新设备编号已存在');
     
+    // Get all repair records for this machine
+    const repairsQuery = query(collection(db, REPAIRS_COLLECTION), where('machineId', '==', oldId));
+    const repairsSnapshot = await getDocs(repairsQuery);
+    
     const batch = writeBatch(db);
     const oldData = oldSnap.data();
     
@@ -248,6 +273,12 @@ export const renameMachine = async (oldId: string, newId: string, data: Partial<
     });
     
     batch.delete(oldRef);
+    
+    // Update all repair records
+    repairsSnapshot.forEach((repairDoc) => {
+      const repairRef = doc(db, REPAIRS_COLLECTION, repairDoc.id);
+      batch.update(repairRef, { machineId: newId });
+    });
     
     await batch.commit();
   } catch (error) {
