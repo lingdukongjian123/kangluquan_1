@@ -144,6 +144,7 @@ export default function App() {
   const [newMachineId, setNewMachineId] = useState('');
   const [newCommunity, setNewCommunity] = useState('');
   const [newLocation, setNewLocation] = useState('');
+  const [confirmDeleteCheckbox, setConfirmDeleteCheckbox] = useState(false);
 
   const faultOptions = [
     'PP滤芯更换',
@@ -582,34 +583,34 @@ export default function App() {
                   
                   <div className="space-y-4 mb-8">
                     <div className="flex items-start gap-3">
-                      <div className="mt-1 p-1 bg-gray-50 rounded-lg">
-                        <MapPin size={14} className="text-blue-500" />
+                      <div className="mt-1 p-1.5 bg-blue-50 rounded-lg">
+                        <MapPin size={18} className="text-blue-600" />
                       </div>
                       <div className="flex-1">
-                        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wide mb-0.5">小区位置</p>
-                        <p className="text-sm text-gray-700 font-bold leading-relaxed">
+                        <p className="text-sm text-gray-500 font-black uppercase tracking-wide mb-1">小区位置</p>
+                        <p className="text-2xl text-gray-900 font-black leading-tight">
                           {machine.community} · {machine.location}
                         </p>
                       </div>
                     </div>
                     <div className="flex items-start gap-3">
-                      <div className="mt-1 p-1 bg-gray-50 rounded-lg">
-                        <AlertCircle size={14} className="text-gray-400" />
+                      <div className="mt-1 p-1.5 bg-red-50 rounded-lg">
+                        <AlertCircle size={20} className="text-red-500" />
                       </div>
                       <div className="flex-1">
-                        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wide mb-0.5">最近故障</p>
-                        <p className="text-sm text-gray-700 font-medium line-clamp-2 leading-relaxed">
+                        <p className="text-sm text-gray-500 font-black uppercase tracking-wide mb-1">最近故障</p>
+                        <p className="text-xl text-gray-800 font-bold line-clamp-2 leading-snug">
                           {machine.lastFault || <span className="text-gray-300 italic font-normal">暂无故障记录</span>}
                         </p>
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
-                      <div className="p-1 bg-gray-50 rounded-lg">
-                        <Clock size={14} className="text-gray-400" />
+                      <div className="p-1.5 bg-gray-100 rounded-lg">
+                        <Clock size={20} className="text-gray-600" />
                       </div>
                       <div className="flex-1">
-                        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wide mb-0.5">最后维修</p>
-                        <p className="text-xs text-gray-600 font-semibold">
+                        <p className="text-sm text-gray-500 font-black uppercase tracking-wide mb-0.5">最后维修</p>
+                        <p className="text-lg text-gray-700 font-bold">
                           {machine.lastRepairTime || '从未维修'}
                         </p>
                       </div>
@@ -745,17 +746,31 @@ export default function App() {
         )}
 
         {modalType === 'delete_confirm' && selectedMachine && (
-          <Modal isOpen={true} onClose={() => setModalType(null)} title="确认删除">
+          <Modal isOpen={true} onClose={() => { setModalType(null); setConfirmDeleteCheckbox(false); }} title="确认删除">
             <div className="space-y-6 text-center">
               <div className="bg-red-50 p-6 rounded-3xl border border-red-100">
                 <Trash2 className="mx-auto text-red-500 mb-4" size={48} />
-                <p className="text-gray-900 font-black text-lg">确定要删除设备 {selectedMachine.id} 吗？</p>
+                <p className="text-gray-900 font-black text-xl">确定要删除设备 {selectedMachine.id} 吗？</p>
                 <p className="text-gray-500 text-sm mt-2">此操作不可撤销，该设备的所有信息将被永久删除。</p>
               </div>
+              
+              <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-2xl border border-gray-200 text-left">
+                <input 
+                  type="checkbox" 
+                  id="confirm-delete"
+                  checked={confirmDeleteCheckbox}
+                  onChange={(e) => setConfirmDeleteCheckbox(e.target.checked)}
+                  className="w-6 h-6 rounded-lg border-gray-300 text-red-600 focus:ring-red-500"
+                />
+                <label htmlFor="confirm-delete" className="text-sm font-bold text-gray-700 cursor-pointer select-none">
+                  我确认要删除此设备及其所有历史记录
+                </label>
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
-                <button onClick={() => setModalType(null)} className="py-4 bg-gray-100 text-gray-600 rounded-2xl font-black">取消</button>
+                <button onClick={() => { setModalType(null); setConfirmDeleteCheckbox(false); }} className="py-4 bg-gray-100 text-gray-600 rounded-2xl font-black">取消</button>
                 <button 
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || !confirmDeleteCheckbox}
                   onClick={handleDeleteMachine} 
                   className="py-4 bg-red-600 text-white rounded-2xl font-black shadow-lg shadow-red-100 disabled:opacity-50 flex items-center justify-center gap-2"
                 >
@@ -869,15 +884,23 @@ export default function App() {
               {repairs.filter(r => r.machineId === selectedMachine.id).length === 0 ? (
                 <p className="text-center py-10 text-gray-400">暂无记录</p>
               ) : repairs.filter(r => r.machineId === selectedMachine.id).map(r => (
-                <div key={r.id} className="border-l-4 border-blue-600 pl-4 py-2 bg-gray-50 rounded-r-xl">
-                  <p className="text-[10px] text-gray-400 font-bold">{r.date}</p>
-                  <p className="font-bold text-sm text-gray-700">{r.faultDesc}</p>
-                  {r.repairContent && <p className="text-xs text-gray-500 mt-1">总结: {r.repairContent}</p>}
-                  {r.partsReplaced && <p className="text-xs text-gray-500">零件: {r.partsReplaced}</p>}
-                  <p className="text-[10px] text-gray-400 mt-1 uppercase">处理人: {r.worker}</p>
-                  <span className={`text-[10px] font-black uppercase ${r.status === 'completed' ? 'text-green-500' : 'text-red-500'}`}>
-                    {r.status === 'completed' ? '已修复' : '待处理'}
-                  </span>
+                <div key={r.id} className="border-l-4 border-blue-600 pl-4 py-4 bg-gray-50 rounded-r-xl space-y-2">
+                  <p className="text-sm text-gray-400 font-bold">{r.date}</p>
+                  <p className="font-black text-xl text-gray-800 leading-tight">{r.faultDesc}</p>
+                  {r.repairContent && (
+                    <div className="bg-white/50 p-2 rounded-lg border border-gray-100">
+                      <p className="text-base text-gray-600 font-bold">维修总结: {r.repairContent}</p>
+                    </div>
+                  )}
+                  {r.partsReplaced && (
+                    <p className="text-base text-gray-600 font-bold">更换零件: {r.partsReplaced}</p>
+                  )}
+                  <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+                    <p className="text-sm text-gray-500 font-black uppercase">处理人: {r.worker}</p>
+                    <span className={`text-sm font-black uppercase px-2 py-0.5 rounded-md ${r.status === 'completed' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
+                      {r.status === 'completed' ? '已修复' : '待处理'}
+                    </span>
+                  </div>
                 </div>
               ))}
             </div>
